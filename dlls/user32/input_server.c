@@ -1,19 +1,16 @@
 // input_server.c
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <string.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #include <stdio.h>
 #include <pthread.h>
-#include <windows.h>
 #include "input_server.h"
 
 #define PORT 12345
 #define BUFFER_SIZE 1024
 
-static int server_fd = -1;           // Global server socket file descriptor
-static volatile int stop_server = 0; // Global flag to stop the server
+static SOCKET server_fd = INVALID_SOCKET; // Global server socket
+static volatile int stop_server = 0;      // Global flag to stop the server
 
 void process_command(const char *command)
 {
@@ -35,28 +32,28 @@ void process_command(const char *command)
 
 void *client_handler_thread(void *arg)
 {
-    int client_socket = *(int *)arg;
+    SOCKET client_socket = *(SOCKET *)arg;
     free(arg); // Free the allocated memory for the socket
 
     char buffer[BUFFER_SIZE] = {0};
 
-    printf("SOCKET_SERVER: Client connected: socket %d\n", client_socket);
+    printf("SOCKET_SERVER: Client connected: socket %ld\n", client_socket);
 
     while (!stop_server)
     {
-        int read_size = read(client_socket, buffer, BUFFER_SIZE);
+        int read_size = recv(client_socket, buffer, BUFFER_SIZE, 0);
         if (read_size <= 0)
         {
-            printf("SOCKET_SERVER: Client disconnected: socket %d\n", client_socket);
-            close(client_socket);
+            printf("SOCKET_SERVER: Client disconnected: socket %ld\n", client_socket);
+            closesocket(client_socket);
             return NULL;
         }
         buffer[read_size] = '\0';
-        printf("SOCKET_SERVER: Received command from socket %d: %s\n", client_socket, buffer);
+        printf("SOCKET_SERVER: Received command from socket %ld: %s\n", client_socket, buffer);
         process_command(buffer);
     }
 
-    close(client_socket);
+    closesocket(client_socket);
     return NULL;
 }
 
@@ -69,8 +66,8 @@ void *socket_server_thread(void *arg)
 
     while (!stop_server)
     {
-        int *new_socket = malloc(sizeof(int));
-        if ((*new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
+        SOCKET *new_socket = malloc(sizeof(SOCKET));
+        if ((*new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == INVALID_SOCKET)
         {
             if (stop_server)
             {
@@ -97,16 +94,25 @@ void start_socket_server()
     struct sockaddr_in address;
     int opt = 1;
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
     {
-        printf("SOCKET_SERVER: Socket creation failed\n");
+        printf("SOCKET_SERVER: WSAStartup failed\n");
         return;
     }
 
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+    {
+        printf("SOCKET_SERVER: Socket creation failed\n");
+        WSACleanup();
+        return;
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) == SOCKET_ERROR)
     {
         printf("SOCKET_SERVER: Setsockopt failed\n");
-        close(server_fd);
+        closesocket(server_fd);
+        WSACleanup();
         return;
     }
 
@@ -114,17 +120,19 @@ void start_socket_server()
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
     {
         printf("SOCKET_SERVER: Bind failed\n");
-        close(server_fd);
+        closesocket(server_fd);
+        WSACleanup();
         return;
     }
 
-    if (listen(server_fd, 3) < 0)
+    if (listen(server_fd, 3) == SOCKET_ERROR)
     {
         printf("SOCKET_SERVER: Listen failed\n");
-        close(server_fd);
+        closesocket(server_fd);
+        WSACleanup();
         return;
     }
 
@@ -135,10 +143,11 @@ void start_socket_server()
 void stop_socket_server()
 {
     stop_server = 1;
-    if (server_fd != -1)
+    if (server_fd != INVALID_SOCKET)
     {
-        close(server_fd);
-        server_fd = -1;
+        closesocket(server_fd);
+        server_fd = INVALID_SOCKET;
+        WSACleanup();
     }
     printf("SOCKET_SERVER: Socket server stopped\n");
 }
