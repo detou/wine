@@ -23,6 +23,7 @@ C_SRCS = \
 	hook.c \
 	icontitle.c \
 	input.c \
+    input_server.c \
 	listbox.c \
 	lstr.c \
 	mdi.c \
