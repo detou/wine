@@ -22,7 +22,7 @@
 #include "controls.h"
 #include "imm.h"
 #include "immdev.h"
-#include "input_socket.h"
+#include "input_server.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
