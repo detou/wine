@@ -58,16 +58,6 @@ HWND get_main_window_handle(void)
 
 void do_mouse(HWND window, DWORD flags, int x, int y)
 {
-    // INPUT input;
-    // input.type = INPUT_MOUSE;
-    // input.mi.dx = x;
-    // input.mi.dy = y;
-    // input.mi.mouseData = 0;
-    // input.mi.dwFlags = flags;
-    // input.mi.time = 0;
-    // input.mi.dwExtraInfo = 0;
-
-    // SendInput(1, &input, sizeof(INPUT));
     SERVER_START_REQ(send_hardware_message)
     {
         req->win = window;
@@ -87,36 +77,141 @@ void do_mouse(HWND window, DWORD flags, int x, int y)
     SERVER_END_REQ;
 }
 
-void test_click(int pixel_x, int pixel_y)
+void do_keyboard(HWND window, DWORD flags, unsigned short key)
 {
-    FIXME("SOCKET_SERVER: Clicking on window %p\n", window_handle);
+    SERVER_START_REQ(send_hardware_message)
+    {
+        req->win = window;
+        req->flags = 0;
+        req->input.type = INPUT_KEYBOARD;
+        req->input.kbd.vkey = key;
+        req->input.kbd.scan = 0;
+        req->input.kbd.flags = flags;
+        req->input.kbd.time = 0;
+        req->input.kbd.info = 0;
+        req->flags |= SEND_HWMSG_RAWINPUT;
 
+        wine_server_call(req);
+    }
+    SERVER_END_REQ;
+}
+
+void decode_mouse_move_command(const char *command, int *x, int *y)
+{
+    // Move the pointer to the data part
+    const char *data = command + 2;
+
+    // Extract x
+    memcpy(x, data, sizeof(int));
+    data += sizeof(int);
+
+    // Extract y
+    memcpy(y, data, sizeof(int));
+}
+
+void decode_mouse_button_command(const char *command, int *x, int *y, int *right_click)
+{
+    // Move the pointer to the data part
+    const char *data = command + 2;
+
+    // Extract x
+    memcpy(x, data, sizeof(int));
+    data += sizeof(int);
+
+    // Extract y
+    memcpy(y, data, sizeof(int));
+    data += sizeof(int);
+
+    // Extract rightClick
+    memcpy(right_click, data, 1);
+}
+
+void mouse_move(int pixel_x, int pixel_y)
+{
     do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE, pixel_x, pixel_y);
-    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN, pixel_x, pixel_y);
-    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP, pixel_x, pixel_y);
+}
 
-    FIXME("SOCKET_SERVER: Mouse click simulated at (%lu, %lu)\n", pixel_x, pixel_y);
+void mouse_press(int pixel_x, int pixel_y, int right_click)
+{
+    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | (right_click == 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN), pixel_x, pixel_y);
+}
+
+void mouse_release(int pixel_x, int pixel_y, int right_click)
+{
+    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | (right_click == 0 ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP), pixel_x, pixel_y);
+}
+
+void press_key(unsigned short key)
+{
+    do_keyboard(window_handle, 0, key);
+}
+
+void release_key(unsigned short key)
+{
+    do_keyboard(window_handle, KEYEVENTF_KEYUP, key);
+}
+
+void send_key(unsigned short key)
+{
+    press_key(key);
+    Sleep(2);
+    release_key(key);
 }
 
 void process_command(const char *command)
 {
-    // if (strncmp(command, "key:", 4) == 0)
-    // {
-    //     char key = command[4];
-    //     INPUT ip;
-    //     ip.type = INPUT_KEYBOARD;
-    //     ip.ki.wVk = key;
-    //     ip.ki.dwFlags = 0; // Key press
-    //     SendInput(1, &ip, sizeof(INPUT));
+    // Read first two characters of command, they determine the command type
+    char command_type[3];
+    memcpy(command_type, command, 2);
+    command_type[2] = '\0';
 
-    //     ip.ki.dwFlags = KEYEVENTF_KEYUP; // Key release
-    //     SendInput(1, &ip, sizeof(INPUT));
-    // }
-    // Add more command processing as needed
-    // FIXME("SOCKET_SERVER: Received command: %s\n", command);
+    // Compare it with "mm", "mp", "mr"
+    if (strcmp(command_type, "mm") == 0)
+    {
+        int x, y;
+        decode_mouse_move_command(command, &x, &y);
+        mouse_move(x, y);
+    }
+    else if (strcmp(command_type, "mp") == 0)
+    {
+        int x, y, right_click;
+        decode_mouse_button_command(command, &x, &y, &right_click);
+        mouse_press(x, y, right_click);
+    }
+    else if (strcmp(command_type, "mr") == 0)
+    {
+        int x, y, right_click;
+        decode_mouse_button_command(command, &x, &y, &right_click);
+        mouse_release(x, y, right_click);
+    }
+    else
+    {
+        FIXME("SOCKET_SERVER: Unknown command type: %s\n", command_type);
+    }
 
-    printf("SOCKET_SERVER: Received command: %s\n", command);
-    test_click(508, 585);
+    // mouse_click(508, 428);
+    // Sleep(100);
+    // press_key(VK_SHIFT);
+    // send_key('A');
+    // release_key(VK_SHIFT);
+    // char myChar = *command;
+    // // if (strncmp(command, "key:", 4) == 0)
+    // // {
+    // //     char key = command[4];
+    // //     INPUT ip;
+    // //     ip.type = INPUT_KEYBOARD;
+    // //     ip.ki.wVk = key;
+    // //     ip.ki.dwFlags = 0; // Key press
+    // //     SendInput(1, &ip, sizeof(INPUT));
+
+    // //     ip.ki.dwFlags = KEYEVENTF_KEYUP; // Key release
+    // //     SendInput(1, &ip, sizeof(INPUT));
+    // // }
+    // // Add more command processing as needed
+    // // FIXME("SOCKET_SERVER: Received command: %s\n", command);
+
+    // printf("SOCKET_SERVER: Received command: %s\n", command);
+    // test_click(508, 585);
     // test_click(508, 561);
 }
 
