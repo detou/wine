@@ -1,14 +1,14 @@
 // input_server.c
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
+#include "input_server.h"
+#include "user_private.h"
+#include "wine/debug.h"
+#include "wine/server.h"
+#include "wine/server_protocol.h"
 #include <stdio.h>
 #include <unistd.h>
-#include "input_server.h"
-#include "wine/server.h"
-#include "wine/debug.h"
-#include "wine/server_protocol.h"
-#include "user_private.h"
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
@@ -70,7 +70,7 @@ void do_mouse(HWND window, DWORD flags, int x, int y)
         req->input.mouse.flags = flags;
         req->input.mouse.time = 0;
         req->input.mouse.info = 0;
-        req->flags |= SEND_HWMSG_RAWINPUT;
+        // req->flags |= SEND_HWMSG_RAWINPUT;
 
         wine_server_call(req);
     }
@@ -89,7 +89,7 @@ void do_keyboard(HWND window, DWORD flags, unsigned short key)
         req->input.kbd.flags = flags;
         req->input.kbd.time = 0;
         req->input.kbd.info = 0;
-        req->flags |= SEND_HWMSG_RAWINPUT;
+        // req->flags |= SEND_HWMSG_RAWINPUT;
 
         wine_server_call(req);
     }
@@ -133,12 +133,12 @@ void mouse_move(int pixel_x, int pixel_y)
 
 void mouse_press(int pixel_x, int pixel_y, int right_click)
 {
-    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | (right_click == 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN), pixel_x, pixel_y);
+    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | (right_click == 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN), pixel_x, pixel_y);
 }
 
 void mouse_release(int pixel_x, int pixel_y, int right_click)
 {
-    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | (right_click == 0 ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP), pixel_x, pixel_y);
+    do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | (right_click == 0 ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP), pixel_x, pixel_y);
 }
 
 void press_key(unsigned short key)
@@ -158,35 +158,52 @@ void send_key(unsigned short key)
     release_key(key);
 }
 
-void process_command(const char *command)
+void process_command(const char *init_command, int read_size)
 {
     // Read first two characters of command, they determine the command type
-    char command_type[3];
-    memcpy(command_type, command, 2);
-    command_type[2] = '\0';
+    const char *command = init_command;
+    int left = read_size;
 
-    // Compare it with "mm", "mp", "mr"
-    if (strcmp(command_type, "mm") == 0)
+    FIXME("SOCKET_SERVER: Read size: %d\n", read_size);
+
+    while (left > 1)
     {
-        int x, y;
-        decode_mouse_move_command(command, &x, &y);
-        mouse_move(x, y);
-    }
-    else if (strcmp(command_type, "mp") == 0)
-    {
-        int x, y, right_click;
-        decode_mouse_button_command(command, &x, &y, &right_click);
-        mouse_press(x, y, right_click);
-    }
-    else if (strcmp(command_type, "mr") == 0)
-    {
-        int x, y, right_click;
-        decode_mouse_button_command(command, &x, &y, &right_click);
-        mouse_release(x, y, right_click);
-    }
-    else
-    {
-        FIXME("SOCKET_SERVER: Unknown command type: %s\n", command_type);
+        char command_type[3];
+        memcpy(command_type, command, 2);
+        command_type[2] = '\0';
+
+        // Compare it with "mm", "mp", "mr"
+        if (strcmp(command_type, "mm") == 0)
+        {
+            int x, y;
+            decode_mouse_move_command(command, &x, &y);
+            FIXME("SOCKET_SERVER: Mouse move: %d, %d\n", x, y);
+            mouse_move(x, y);
+            command += 10;
+            left -= 10;
+        }
+        else if (strcmp(command_type, "mp") == 0)
+        {
+            int x, y, right_click;
+            decode_mouse_button_command(command, &x, &y, &right_click);
+            FIXME("SOCKET_SERVER: Mouse press: %d, %d, %d\n", x, y, right_click);
+            mouse_press(x, y, right_click);
+            command += 11;
+            left -= 11;
+        }
+        else if (strcmp(command_type, "mr") == 0)
+        {
+            int x, y, right_click;
+            decode_mouse_button_command(command, &x, &y, &right_click);
+            FIXME("SOCKET_SERVER: Mouse release: %d, %d, %d\n", x, y, right_click);
+            mouse_release(x, y, right_click);
+            command += 11;
+            left -= 11;
+        }
+        else
+        {
+            FIXME("SOCKET_SERVER: Unknown command type: %s\n", command_type);
+        }
     }
 
     // mouse_click(508, 428);
@@ -235,7 +252,7 @@ DWORD WINAPI client_handler_thread(LPVOID lpParam)
         }
         buffer[read_size] = '\0';
         FIXME("SOCKET_SERVER: Received command from socket %ld: %s\n", client_socket, buffer);
-        process_command(buffer);
+        process_command(buffer, read_size);
     }
 
     closesocket(client_socket);
