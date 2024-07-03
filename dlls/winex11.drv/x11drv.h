@@ -400,6 +400,12 @@ struct x11drv_thread_data
     int      xi2_rawinput_only;
     int      xi2_active_touches;
     int      xi2_primary_touchid;
+    // Detou: added fields for multiple devices
+    void     *xi2_devices; /* list of XInput2 devices (valid when state is enabled) */
+    int      xi2_device_count;
+    BOOL     xi2_core_left;
+    BOOL     xi2_has_pointer_inside;
+    // Detou: end
 #endif /* HAVE_X11_EXTENSIONS_XINPUT2_H */
 };
 

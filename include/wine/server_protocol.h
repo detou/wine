@@ -2861,7 +2861,9 @@ struct send_hardware_message_reply
 };
 #define SEND_HWMSG_INJECTED    0x01
 #define SEND_HWMSG_RAWINPUT    0x02
-
+// Detou: added new message type
+#define SEND_HWMSG_WINDOW 0x04
+// Detou: end
 
 
 struct get_message_request

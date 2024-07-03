@@ -60,8 +60,8 @@ void do_mouse(HWND window, DWORD flags, int x, int y)
 {
     SERVER_START_REQ(send_hardware_message)
     {
-        req->win = window;
-        req->flags = 0;
+        req->win = wine_server_user_handle(window);
+        req->flags = SEND_HWMSG_WINDOW;
         req->input.type = INPUT_MOUSE;
         FIXME("Coordinates: %d,%d\n", x, y);
         req->input.mouse.x = x;
@@ -70,11 +70,11 @@ void do_mouse(HWND window, DWORD flags, int x, int y)
         req->input.mouse.flags = flags;
         req->input.mouse.time = 0;
         req->input.mouse.info = 0;
-        // req->flags |= SEND_HWMSG_RAWINPUT;
 
         wine_server_call(req);
     }
     SERVER_END_REQ;
+    // mouse_event(flags, x, y, 0, 0);
 }
 
 void do_keyboard(HWND window, DWORD flags, unsigned short key)
@@ -82,14 +82,13 @@ void do_keyboard(HWND window, DWORD flags, unsigned short key)
     SERVER_START_REQ(send_hardware_message)
     {
         req->win = window;
-        req->flags = 0;
+        req->flags = SEND_HWMSG_WINDOW;
         req->input.type = INPUT_KEYBOARD;
         req->input.kbd.vkey = key;
         req->input.kbd.scan = 0;
         req->input.kbd.flags = flags;
         req->input.kbd.time = 0;
         req->input.kbd.info = 0;
-        // req->flags |= SEND_HWMSG_RAWINPUT;
 
         wine_server_call(req);
     }
@@ -128,6 +127,7 @@ void decode_mouse_button_command(const char *command, int *x, int *y, int *right
 
 void mouse_move(int pixel_x, int pixel_y)
 {
+    // NtUserSetCursorPos(pixel_x, pixel_y);
     do_mouse(window_handle, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE, pixel_x, pixel_y);
 }
 

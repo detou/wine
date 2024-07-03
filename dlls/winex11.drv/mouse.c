@@ -348,6 +348,13 @@ void X11DRV_XInput2_Init(void)
         data->xi2_core_pointer = 0;
         WARN( "XInput 2.2 not available\n" );
     }
+
+    // Detou: setting default values for xi2 variables
+    if (data->xi2_devices) pXIFreeDeviceInfo(data->xi2_devices);
+    data->xi2_devices = pXIQueryDevice(data->display, XIAllDevices, &data->xi2_device_count);
+    data->xi2_core_left = FALSE;
+    data->xi2_has_pointer_inside = FALSE;
+    // Detou: end
 #endif
 }
 
@@ -366,7 +373,9 @@ void X11DRV_XInput2_Enable( Display *display, Window window, long event_mask )
 
     mask.mask     = mask_bits;
     mask.mask_len = sizeof(mask_bits);
-    mask.deviceid = XIAllMasterDevices;
+    // Detou: changed to all devices
+    mask.deviceid = XIAllDevices;
+    // Detou: end
     memset( mask_bits, 0, sizeof(mask_bits) );
 
     if (NtUserGetWindowThread( NtUserGetDesktopWindow(), NULL ) == GetCurrentThreadId())
@@ -397,6 +406,11 @@ void X11DRV_XInput2_Enable( Display *display, Window window, long event_mask )
         XISetMask( mask_bits, XI_DeviceChanged );
         if (raw) XISetMask( mask_bits, XI_RawButtonRelease );
     }
+
+    // Detou: added support for Enter and Leave events
+    XISetMask(mask_bits, XI_Enter);
+    XISetMask(mask_bits, XI_Leave);
+    // Detou: end
 
     pXISelectEvents( display, raw ? DefaultRootWindow( display ) : window, &mask, 1 );
     if (!raw) XSelectInput( display, window, event_mask );
@@ -1793,6 +1807,38 @@ static BOOL map_raw_event_coords( XIRawEvent *event, INPUT *input, RAWINPUT *raw
     return TRUE;
 }
 
+// Detou: This function is used to update the relative valuators when the core pointer is moved
+static BOOL refresh_core_pointer(int deviceid)
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+
+    TRACE("Refresh devices list");
+    if (thread_data->xi2_devices)
+        pXIFreeDeviceInfo(thread_data->xi2_devices);
+    thread_data->xi2_devices = pXIQueryDevice(thread_data->display, XIAllDevices, &thread_data->xi2_device_count);
+
+    // Try to detect the current device. Can be troublesome when several devices are
+    // moving at the same time at the moment
+    TRACE("refresh_core_pointer Updating core pointer, devices count: %d\n", thread_data->xi2_device_count);
+    XIDeviceInfo *devices = thread_data->xi2_devices;
+
+    for (int i = 0; i < thread_data->xi2_device_count; i++)
+    {
+        if (devices[i].deviceid == deviceid && devices[i].use != XISlavePointer)
+        {
+            TRACE("refresh_core_pointer device, id %d, master: %d\n", devices[i].deviceid, devices[i].use != XISlavePointer);
+            thread_data->xi2_core_pointer = deviceid;
+            int count;
+            XIDeviceInfo *pointer_info = pXIQueryDevice(thread_data->display, thread_data->xi2_core_pointer, &count);
+            update_relative_valuators(pointer_info->classes, pointer_info->num_classes);
+            pXIFreeDeviceInfo(pointer_info);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+// Detou: end
 
 /***********************************************************************
  *           X11DRV_RawMotion
@@ -1809,6 +1855,19 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
         TRACE( "old serial %lu, ignoring\n", xev->serial );
         return FALSE;
     }
+
+    // Detou: This is a hack to fix the issue with the core pointer leaving the window
+    if (event->deviceid != thread_data->xi2_core_pointer && thread_data->xi2_core_left && thread_data->xi2_has_pointer_inside)
+    {
+        FIXME("SOCKET_SERVER: X11DRV_RawMotion Refreshing device\n");
+        refresh_core_pointer(event->deviceid);
+        thread_data->xi2_core_left = FALSE;
+        thread_data->xi2_has_pointer_inside = FALSE;
+    }
+
+    if (event->deviceid != thread_data->xi2_core_pointer)
+        return FALSE;
+    // Detou: end
 
     input.type = INPUT_MOUSE;
     input.u.mi.mouseData   = 0;
@@ -2071,6 +2130,43 @@ static BOOL X11DRV_RawTouchEvent( XGenericEventCookie *xev )
     return TRUE;
 }
 
+// Detou: added to handle XI_Enter and XI_Leave events
+static BOOL X11DRV_EnterEvent(XGenericEventCookie *cookie)
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    XIEnterEvent *event = cookie->data;
+    TRACE("X11DRV_EnterEvent, device id: %d\n", event->deviceid);
+
+    // Try to detect the current device. Can be troublesome when several devices are
+    // moving at the same time at the moment
+    if (event->deviceid != thread_data->xi2_core_pointer)
+    {
+        TRACE("X11DRV_EnterEvent Updating core pointer");
+        refresh_core_pointer(event->deviceid);
+    }
+
+    return TRUE;
+}
+
+static BOOL X11DRV_LeaveEvent(XGenericEventCookie *cookie)
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    XILeaveEvent *event = cookie->data;
+    TRACE("X11DRV_LeaveEvent, device id: %d\n", event->deviceid);
+
+    // Try to detect the current device. Can be troublesome when several devices are
+    // moving at the same time at the moment
+    if (event->deviceid == thread_data->xi2_core_pointer)
+    {
+        TRACE("X11DRV_LeaveEvent Core pointer left the window, we need a refresh\n");
+        thread_data->xi2_core_left = TRUE;
+        thread_data->xi2_has_pointer_inside = FALSE;
+    }
+
+    return TRUE;
+}
+// Detou: end
+
 /***********************************************************************
  *           X11DRV_GenericEvent
  */
@@ -2104,6 +2200,17 @@ BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *xev )
     case XI_RawTouchEnd:
         ret = X11DRV_RawTouchEvent( event );
         break;
+
+    // Detou: added to handle XI_Enter and XI_Leave events
+    case XI_Enter:
+        FIXME("SOCKET_SERVER: X11DRV_GenericEvent: XI_Enter\n");
+        ret = X11DRV_EnterEvent(event);
+        break;
+    case XI_Leave:
+        FIXME("SOCKET_SERVER: X11DRV_GenericEvent: XI_Leave\n");
+        ret = X11DRV_LeaveEvent(event);
+        break;
+    // Detou: end
 
     default:
         TRACE( "Unhandled event %#x\n", event->evtype );
