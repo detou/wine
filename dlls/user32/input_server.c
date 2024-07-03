@@ -125,6 +125,23 @@ void decode_mouse_button_command(const char *command, int *x, int *y, int *right
     memcpy(right_click, data, 1);
 }
 
+void decode_keyboard_command(const char *command, UINT64 *key, int *shift, int *ctrl)
+{
+    // Move the pointer to the data part
+    const char *data = command + 2;
+
+    // Extract key
+    memcpy(key, data, sizeof(UINT64));
+    data += sizeof(UINT64);
+
+    // Extract shift
+    memcpy(shift, data, 1);
+    data += 1;
+
+    // Extract ctrl
+    memcpy(ctrl, data, 1);
+}
+
 void mouse_move(int pixel_x, int pixel_y)
 {
     // NtUserSetCursorPos(pixel_x, pixel_y);
@@ -149,13 +166,6 @@ void press_key(unsigned short key)
 void release_key(unsigned short key)
 {
     do_keyboard(window_handle, KEYEVENTF_KEYUP, key);
-}
-
-void send_key(unsigned short key)
-{
-    press_key(key);
-    Sleep(2);
-    release_key(key);
 }
 
 void process_command(const char *init_command, int read_size)
@@ -200,36 +210,39 @@ void process_command(const char *init_command, int read_size)
             command += 11;
             left -= 11;
         }
+        else if (strcmp(command_type, "kp") == 0)
+        {
+            UINT64 key;
+            int shift, ctrl;
+            decode_keyboard_command(command, &key, &shift, &ctrl);
+            FIXME("SOCKET_SERVER: Keyboard press: %d, %d, %d\n", key, shift, ctrl);
+            if (shift)
+                press_key(VK_SHIFT);
+            if (ctrl)
+                press_key(VK_CONTROL);
+            press_key(key);
+            command += 12;
+            left -= 12;
+        }
+        else if (strcmp(command_type, "kr") == 0)
+        {
+            UINT64 key;
+            int shift, ctrl;
+            decode_keyboard_command(command, &key, &shift, &ctrl);
+            FIXME("SOCKET_SERVER: Keyboard release: %d, %d, %d\n", key, shift, ctrl);
+            release_key(key);
+            if (ctrl)
+                release_key(VK_CONTROL);
+            if (shift)
+                release_key(VK_SHIFT);
+            command += 12;
+            left -= 12;
+        }
         else
         {
             FIXME("SOCKET_SERVER: Unknown command type: %s\n", command_type);
         }
     }
-
-    // mouse_click(508, 428);
-    // Sleep(100);
-    // press_key(VK_SHIFT);
-    // send_key('A');
-    // release_key(VK_SHIFT);
-    // char myChar = *command;
-    // // if (strncmp(command, "key:", 4) == 0)
-    // // {
-    // //     char key = command[4];
-    // //     INPUT ip;
-    // //     ip.type = INPUT_KEYBOARD;
-    // //     ip.ki.wVk = key;
-    // //     ip.ki.dwFlags = 0; // Key press
-    // //     SendInput(1, &ip, sizeof(INPUT));
-
-    // //     ip.ki.dwFlags = KEYEVENTF_KEYUP; // Key release
-    // //     SendInput(1, &ip, sizeof(INPUT));
-    // // }
-    // // Add more command processing as needed
-    // // FIXME("SOCKET_SERVER: Received command: %s\n", command);
-
-    // printf("SOCKET_SERVER: Received command: %s\n", command);
-    // test_click(508, 585);
-    // test_click(508, 561);
 }
 
 DWORD WINAPI client_handler_thread(LPVOID lpParam)
