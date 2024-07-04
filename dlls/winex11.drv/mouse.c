@@ -1859,7 +1859,7 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
     // Detou: This is a hack to fix the issue with the core pointer leaving the window
     if (event->deviceid != thread_data->xi2_core_pointer && thread_data->xi2_core_left && thread_data->xi2_has_pointer_inside)
     {
-        FIXME("SOCKET_SERVER: X11DRV_RawMotion Refreshing device\n");
+        TRACE( "SOCKET_SERVER: X11DRV_RawMotion Refreshing device\n" );
         refresh_core_pointer(event->deviceid);
         thread_data->xi2_core_left = FALSE;
         thread_data->xi2_has_pointer_inside = FALSE;
@@ -2203,11 +2203,9 @@ BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *xev )
 
     // Detou: added to handle XI_Enter and XI_Leave events
     case XI_Enter:
-        FIXME("SOCKET_SERVER: X11DRV_GenericEvent: XI_Enter\n");
         ret = X11DRV_EnterEvent(event);
         break;
     case XI_Leave:
-        FIXME("SOCKET_SERVER: X11DRV_GenericEvent: XI_Leave\n");
         ret = X11DRV_LeaveEvent(event);
         break;
     // Detou: end

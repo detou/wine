@@ -74,7 +74,6 @@ void do_mouse(HWND window, DWORD flags, int x, int y)
         wine_server_call(req);
     }
     SERVER_END_REQ;
-    // mouse_event(flags, x, y, 0, 0);
 }
 
 void do_keyboard(HWND window, DWORD flags, unsigned short key)
@@ -122,24 +121,19 @@ void decode_mouse_button_command(const char *command, int *x, int *y, int *right
     data += sizeof(int);
 
     // Extract rightClick
-    memcpy(right_click, data, 1);
+    *right_click = (command[10] == '1');
 }
 
-void decode_keyboard_command(const char *command, UINT64 *key, int *shift, int *ctrl)
+void decode_keyboard_command(const char *command, unsigned short *key, int *shift, int *ctrl)
 {
-    // Move the pointer to the data part
-    const char *data = command + 2;
-
     // Extract key
-    memcpy(key, data, sizeof(UINT64));
-    data += sizeof(UINT64);
+    *key = (unsigned short)command[2];
 
     // Extract shift
-    memcpy(shift, data, 1);
-    data += 1;
+    *shift = (command[3] == '1');
 
     // Extract ctrl
-    memcpy(ctrl, data, 1);
+    *ctrl = (command[4] == '1');
 }
 
 void mouse_move(int pixel_x, int pixel_y)
@@ -212,31 +206,31 @@ void process_command(const char *init_command, int read_size)
         }
         else if (strcmp(command_type, "kp") == 0)
         {
-            UINT64 key;
+            unsigned short key;
             int shift, ctrl;
             decode_keyboard_command(command, &key, &shift, &ctrl);
-            FIXME("SOCKET_SERVER: Keyboard press: %d, %d, %d\n", key, shift, ctrl);
+            FIXME("SOCKET_SERVER: Keyboard press: %x, %d, %d\n", key, shift, ctrl);
             if (shift)
                 press_key(VK_SHIFT);
             if (ctrl)
                 press_key(VK_CONTROL);
             press_key(key);
-            command += 12;
-            left -= 12;
+            command += 5;
+            left -= 5;
         }
         else if (strcmp(command_type, "kr") == 0)
         {
-            UINT64 key;
+            unsigned short key;
             int shift, ctrl;
             decode_keyboard_command(command, &key, &shift, &ctrl);
-            FIXME("SOCKET_SERVER: Keyboard release: %d, %d, %d\n", key, shift, ctrl);
+            FIXME("SOCKET_SERVER: Keyboard release: %x, %d, %d\n", key, shift, ctrl);
             release_key(key);
             if (ctrl)
                 release_key(VK_CONTROL);
             if (shift)
                 release_key(VK_SHIFT);
-            command += 12;
-            left -= 12;
+            command += 5;
+            left -= 5;
         }
         else
         {
